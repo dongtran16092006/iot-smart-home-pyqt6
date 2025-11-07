@@ -25,7 +25,7 @@ The PyQt6 desktop app communicates with an Arduino controller over serial USB, s
 ✅ Interactive dashboard:
 - Toggle devices (LED, fan, door) manually  
 - Visual gas-level graph  
-- Isometric “Kawaii Home” 3D layout  
+- Isometric “Nha pRo mAx” 3D layout  
 
 ✅ Secure login:
 - Username + password loaded from `.env`  
