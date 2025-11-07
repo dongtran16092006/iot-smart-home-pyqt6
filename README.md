@@ -16,7 +16,7 @@ The PyQt6 desktop app communicates with an Arduino controller over serial USB, s
 ✅ Real-time monitoring of:
 - MQ-2 gas sensor  
 - DHT11 temperature + humidity  
-- HC-SR04 distance sensor  
+- HC-SRF05 distance sensor  
 
 ✅ Automatic control logic:
 - Opens servo door + starts fan when gas exceeds threshold  
