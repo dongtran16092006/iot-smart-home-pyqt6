@@ -19,7 +19,7 @@ const bool USE_ULTRASONIC = true;
 // ---------------- State ----------------
 int thrLow  = 380;
 int thrHigh = 450;
-bool modeAuto = true;      // luôn Auto
+bool modeAuto = true;  // luôn Auto
 int ledVal   = 0;
 int fanVal   = 0;
 int servoDeg = 0;
@@ -31,7 +31,6 @@ unsigned long lastManualServoMs = 0;
 
 // ---------------- Helpers ----------------
 int clamp01(int x){ return x<=0?0:1; }
-int clamp255(int x){ if(x<0)return 0; if(x>255)return 255; return x; }
 
 long readDistanceCm(){
   if(!USE_ULTRASONIC) return -1;
@@ -46,7 +45,7 @@ long readDistanceCm(){
 // ---------------- Serial JSON status ----------------
 void sendStatus(bool force=false){
   unsigned long now = millis();
-  if(!force && now - lastStatusMs < 1000) return;  // ✅ Giới hạn 1 Hz chuẩn
+  if(!force && now - lastStatusMs < 1000) return;  // 1 Hz
   lastStatusMs = now;
 
   int gas = analogRead(GAS_PIN);
@@ -56,28 +55,34 @@ void sendStatus(bool force=false){
 
   bool overHi = (gas >= thrHigh);
   bool belowLo = (gas <= thrLow);
-  bool recentlyManual = (millis() - lastManualServoMs < 5000);  // ưu tiên manual 5s
+  bool recentlyManual = (millis() - lastManualServoMs < 5000);
 
   // ---------------- AUTO LOGIC ----------------
   if (!recentlyManual) {
-    if (overHi) {
+    if (overHi) {  // 🚨 GAS cao
       alarmVal = 1;
       digitalWrite(ALARM_PIN, HIGH);
       digitalWrite(FAN_PIN, HIGH);
-      analogWrite(LED_PIN, 255);
+      digitalWrite(LED_PIN, HIGH);
+      fanVal = 1;   // ✅ cập nhật giá trị logic
+      ledVal = 1;   // ✅ để GUI nhận đúng
       if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
     } 
-    else if (belowLo) {
+    else if (belowLo) {  // 🟢 GAS thấp → tắt auto, về manual
       alarmVal = 0;
       digitalWrite(ALARM_PIN, LOW);
       digitalWrite(FAN_PIN, fanVal);
-      analogWrite(LED_PIN, ledVal);
-    } 
-    else {
+    
+      ledVal = 0;                        // ✅ reset LED về 0
+      digitalWrite(LED_PIN, ledVal);     // tắt đèn
+    }
+    else {  // 🟡 Giữa hai ngưỡng
       alarmVal = 1;
       digitalWrite(ALARM_PIN, HIGH);
       digitalWrite(FAN_PIN, HIGH);
-      analogWrite(LED_PIN, ledVal);
+      digitalWrite(LED_PIN, HIGH);
+      fanVal = 1;
+      ledVal = 1;
     }
 
     // --- AUTO DISTANCE ---
@@ -121,17 +126,21 @@ void handleCommand(String cmd){
 
   if(cmd=="STATUS"){ sendStatus(true); return; }
 
-  if (cmd.startsWith("LED")) {
-    if (parseIntAfterSpace(cmd, v)) {
-        ledVal = clamp01(v);             // ép chỉ còn 0 hoặc 1
-        digitalWrite(LED_PIN, ledVal);   // bật/tắt đèn
-    }
-    return;
-}
+  if(cmd.startsWith("LED")){ 
+    if(parseIntAfterSpace(cmd,v)){ 
+      ledVal = clamp01(v);
+      digitalWrite(LED_PIN, ledVal);
+      sendStatus(true);   // ✅ phản hồi ngay cho GUI
 
+    } 
+    return;
+  }
 
   if(cmd.startsWith("FAN")){ 
-    if(parseIntAfterSpace(cmd,v)){ fanVal=clamp01(v); digitalWrite(FAN_PIN,fanVal);} 
+    if(parseIntAfterSpace(cmd,v)){ 
+      fanVal = clamp01(v);
+      digitalWrite(FAN_PIN, fanVal);
+    } 
     return;
   }
 
@@ -139,8 +148,8 @@ void handleCommand(String cmd){
     if(parseIntAfterSpace(cmd,v)){ 
       servoDeg = constrain(v, 0, 180);
       myServo.write(servoDeg);
-      lastManualServoMs = millis();   // người dùng vừa thao tác
-      sendStatus(true);               // cập nhật ngay GUI
+      lastManualServoMs = millis();
+      sendStatus(true);
     } 
     return;
   }
@@ -156,7 +165,10 @@ void handleCommand(String cmd){
   }
 
   if(cmd.startsWith("ALARM")){ 
-    if(parseIntAfterSpace(cmd,v)){ alarmVal=clamp01(v); digitalWrite(ALARM_PIN,alarmVal);} 
+    if(parseIntAfterSpace(cmd,v)){ 
+      alarmVal=clamp01(v);
+      digitalWrite(ALARM_PIN,alarmVal);
+    } 
     return; 
   }
 }
@@ -172,15 +184,15 @@ void setup(){
 
   myServo.attach(SERVO_PIN);
   myServo.write(0);
-  analogWrite(LED_PIN,0);
+  digitalWrite(LED_PIN,LOW);
   digitalWrite(FAN_PIN,LOW);
   digitalWrite(ALARM_PIN,LOW);
 
   dht.begin();
   delay(300);
 
-  lastManualServoMs = millis();   // ✅ tránh cập nhật nhanh lúc đầu
-  sendStatus(true);               // gửi khởi tạo
+  lastManualServoMs = millis();
+  sendStatus(true);
 }
 
 void loop(){
@@ -192,6 +204,5 @@ void loop(){
     } else if((unsigned char)c>=32) buf+=c;
   }
 
-  // ✅ luôn 1 Hz ổn định
-  sendStatus(false);
+  sendStatus(false); // gửi 1 Hz
 }
