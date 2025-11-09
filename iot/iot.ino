@@ -1,7 +1,6 @@
 #include <Servo.h>
 #include <DHT.h>
 
-// ---------------- Pins ----------------
 const int GAS_PIN   = A0;
 const int LED_PIN   = 5;
 const int FAN_PIN   = 7;
@@ -16,10 +15,9 @@ DHT dht(DHT_PIN, DHTTYPE);
 
 const bool USE_ULTRASONIC = true;
 
-// ---------------- State ----------------
 int thrLow  = 380;
 int thrHigh = 450;
-bool modeAuto = true;  // luôn Auto
+bool modeAuto = true;
 int ledVal   = 0;
 int fanVal   = 0;
 int servoDeg = 0;
@@ -27,9 +25,7 @@ int alarmVal = 0;
 
 Servo myServo;
 unsigned long lastStatusMs = 0;
-unsigned long lastManualServoMs = 0;
 
-// ---------------- Helpers ----------------
 int clamp01(int x){ return x<=0?0:1; }
 
 long readDistanceCm(){
@@ -42,10 +38,9 @@ long readDistanceCm(){
   return (long)(dur / 58);
 }
 
-// ---------------- Serial JSON status ----------------
 void sendStatus(bool force=false){
   unsigned long now = millis();
-  if(!force && now - lastStatusMs < 1000) return;  // 1 Hz
+  if(!force && now - lastStatusMs < 1000) return;
   lastStatusMs = now;
 
   int gas = analogRead(GAS_PIN);
@@ -55,37 +50,36 @@ void sendStatus(bool force=false){
 
   bool overHi = (gas >= thrHigh);
   bool belowLo = (gas <= thrLow);
-  bool recentlyManual = (millis() - lastManualServoMs < 5000);
 
-  // ---------------- AUTO LOGIC ----------------
-  if (!recentlyManual) {
-    if (overHi) {  // 🚨 GAS cao
+  // ----------- AUTO LOGIC -----------
+  if (modeAuto) {
+    if (overHi) {
       alarmVal = 1;
       digitalWrite(ALARM_PIN, HIGH);
+      fanVal = 1;
+      ledVal = 1;   // 🔹 LED và FAN bật cùng khi AUTO
       digitalWrite(FAN_PIN, HIGH);
       digitalWrite(LED_PIN, HIGH);
-      fanVal = 1;   // ✅ cập nhật giá trị logic
-      ledVal = 1;   // ✅ để GUI nhận đúng
       if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
     } 
-    else if (belowLo) {  // 🟢 GAS thấp → tắt auto, về manual
+    else if (belowLo) {
       alarmVal = 0;
       digitalWrite(ALARM_PIN, LOW);
-      digitalWrite(FAN_PIN, fanVal);
-    
-      ledVal = 0;                        // ✅ reset LED về 0
-      digitalWrite(LED_PIN, ledVal);     // tắt đèn
-    }
-    else {  // 🟡 Giữa hai ngưỡng
+      fanVal = 0;
+      ledVal = 0;   // 🔹 cùng tắt khi AUTO
+      digitalWrite(FAN_PIN, LOW);
+      digitalWrite(LED_PIN, LOW);
+      if (servoDeg != 0) { servoDeg = 0; myServo.write(servoDeg); }
+    } 
+    else {
       alarmVal = 1;
       digitalWrite(ALARM_PIN, HIGH);
-      digitalWrite(FAN_PIN, HIGH);
-      digitalWrite(LED_PIN, HIGH);
       fanVal = 1;
       ledVal = 1;
+      digitalWrite(FAN_PIN, HIGH);
+      digitalWrite(LED_PIN, HIGH);
     }
 
-    // --- AUTO DISTANCE ---
     if (dist > 0) {
       if (dist <= 50) {
         if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
@@ -96,7 +90,7 @@ void sendStatus(bool force=false){
     }
   }
 
-  // ---------------- GỬI JSON ----------------
+  // ----------- GỬI JSON -----------
   Serial.print("{\"gas\":"); Serial.print(gas);
   Serial.print(",\"distance\":"); Serial.print(dist);
   Serial.print(",\"temperature\":");
@@ -105,7 +99,7 @@ void sendStatus(bool force=false){
   if (isnan(humi)) Serial.print("null"); else Serial.print(humi);
   Serial.print(",\"threshold_low\":"); Serial.print(thrLow);
   Serial.print(",\"threshold_high\":"); Serial.print(thrHigh);
-  Serial.print(",\"mode\":\"AUTO\"");
+  Serial.print(",\"mode\":\""); Serial.print(modeAuto ? "AUTO" : "MANUAL"); Serial.print("\"");
   Serial.print(",\"led\":"); Serial.print(ledVal);
   Serial.print(",\"fan\":"); Serial.print(fanVal);
   Serial.print(",\"servo\":"); Serial.print(servoDeg);
@@ -114,7 +108,6 @@ void sendStatus(bool force=false){
   Serial.flush();
 }
 
-// ---------------- Command Parser ----------------
 bool parseIntAfterSpace(const String& s,int& v){
   int sp=s.indexOf(' '); if(sp<0)return false;
   v=s.substring(sp+1).toInt(); return true;
@@ -126,54 +119,63 @@ void handleCommand(String cmd){
 
   if(cmd=="STATUS"){ sendStatus(true); return; }
 
-  if(cmd.startsWith("LED")){ 
-    if(parseIntAfterSpace(cmd,v)){ 
+  // ---------- AUTO SWITCH ----------
+  if(cmd.startsWith("AUTO")){
+    if(parseIntAfterSpace(cmd,v)){
+      modeAuto = clamp01(v);
+      sendStatus(true);
+    }
+    return;
+  }
+
+  // ---------- LED ----------
+  if(cmd.startsWith("LED")){
+    if(parseIntAfterSpace(cmd,v)){
+      modeAuto = false;
       ledVal = clamp01(v);
       digitalWrite(LED_PIN, ledVal);
-      sendStatus(true);   // ✅ phản hồi ngay cho GUI
-
-    } 
+      sendStatus(true);
+    }
     return;
   }
 
-  if(cmd.startsWith("FAN")){ 
-    if(parseIntAfterSpace(cmd,v)){ 
+  // ---------- FAN ----------
+  if(cmd.startsWith("FAN")){
+    if(parseIntAfterSpace(cmd,v)){
+      modeAuto = false;
       fanVal = clamp01(v);
       digitalWrite(FAN_PIN, fanVal);
-    } 
-    return;
-  }
-
-  if(cmd.startsWith("SERVO")){ 
-    if(parseIntAfterSpace(cmd,v)){ 
-      servoDeg = constrain(v, 0, 180);
-      myServo.write(servoDeg);
-      lastManualServoMs = millis();
+      // ⚠️ KHÔNG đụng tới LED ở đây (độc lập khi manual)
       sendStatus(true);
-    } 
+    }
     return;
   }
 
-  if(cmd.startsWith("THRHI")){ 
-    if(parseIntAfterSpace(cmd,v)){ thrHigh=constrain(v,0,1023);} 
+  // ---------- SERVO ----------
+  if(cmd.startsWith("SERVO")){
+    if(parseIntAfterSpace(cmd,v)){
+      modeAuto = false;
+      servoDeg = constrain(v,0,180);
+      myServo.write(servoDeg);
+      sendStatus(true);
+    }
     return;
   }
 
-  if(cmd.startsWith("THRLO")){ 
-    if(parseIntAfterSpace(cmd,v)){ thrLow=constrain(v,0,1023);} 
-    return;
-  }
+  if(cmd.startsWith("THRHI")){ if(parseIntAfterSpace(cmd,v)) thrHigh=constrain(v,0,1023); return; }
+  if(cmd.startsWith("THRLO")){ if(parseIntAfterSpace(cmd,v)) thrLow =constrain(v,0,1023); return; }
 
-  if(cmd.startsWith("ALARM")){ 
-    if(parseIntAfterSpace(cmd,v)){ 
-      alarmVal=clamp01(v);
-      digitalWrite(ALARM_PIN,alarmVal);
-    } 
-    return; 
+  if(cmd.startsWith("ALARM")){
+    if(parseIntAfterSpace(cmd,v)){
+      modeAuto = false;
+      alarmVal = clamp01(v);
+      digitalWrite(ALARM_PIN, alarmVal);
+      sendStatus(true);
+    }
+    return;
   }
 }
 
-// ---------------- Setup & Loop ----------------
 void setup(){
   Serial.begin(115200);
   pinMode(GAS_PIN,INPUT);
@@ -190,8 +192,6 @@ void setup(){
 
   dht.begin();
   delay(300);
-
-  lastManualServoMs = millis();
   sendStatus(true);
 }
 
@@ -199,10 +199,9 @@ void loop(){
   static String buf;
   while(Serial.available()){
     char c=(char)Serial.read();
-    if(c=='\n'||c=='\r'){ 
-      if(buf.length()){ handleCommand(buf); buf=""; } 
+    if(c=='\n'||c=='\r'){
+      if(buf.length()){ handleCommand(buf); buf=""; }
     } else if((unsigned char)c>=32) buf+=c;
   }
-
-  sendStatus(false); // gửi 1 Hz
+  sendStatus(false);
 }
