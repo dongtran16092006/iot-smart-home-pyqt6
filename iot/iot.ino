@@ -25,6 +25,7 @@ int alarmVal = 0;
 
 Servo myServo;
 unsigned long lastStatusMs = 0;
+bool busySerial = false;   // ⚙️ THÊM DÒNG NÀY (quan trọng!)
 
 int clamp01(int x){ return x<=0?0:1; }
 
@@ -33,7 +34,7 @@ long readDistanceCm(){
   digitalWrite(TRIG_PIN, LOW); delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  unsigned long dur = pulseIn(ECHO_PIN, HIGH, 30000UL);
+  unsigned long dur = pulseIn(ECHO_PIN, HIGH, 25000UL);  // timeout 25ms
   if(!dur) return -1;
   return (long)(dur / 58);
 }
@@ -44,7 +45,7 @@ void sendStatus(bool force=false){
   lastStatusMs = now;
 
   int gas = analogRead(GAS_PIN);
-  long dist = readDistanceCm();
+  long dist = readDistanceCm();     // 📍 chỉ gọi khi không bận serial
   float temp = dht.readTemperature();
   float humi = dht.readHumidity();
 
@@ -57,7 +58,7 @@ void sendStatus(bool force=false){
       alarmVal = 1;
       digitalWrite(ALARM_PIN, HIGH);
       fanVal = 1;
-      ledVal = 1;   // 🔹 LED và FAN bật cùng khi AUTO
+      ledVal = 1;
       digitalWrite(FAN_PIN, HIGH);
       digitalWrite(LED_PIN, HIGH);
       if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
@@ -66,7 +67,7 @@ void sendStatus(bool force=false){
       alarmVal = 0;
       digitalWrite(ALARM_PIN, LOW);
       fanVal = 0;
-      ledVal = 0;   // 🔹 cùng tắt khi AUTO
+      ledVal = 0;
       digitalWrite(FAN_PIN, LOW);
       digitalWrite(LED_PIN, LOW);
       if (servoDeg != 0) { servoDeg = 0; myServo.write(servoDeg); }
@@ -80,6 +81,7 @@ void sendStatus(bool force=false){
       digitalWrite(LED_PIN, HIGH);
     }
 
+    // ----- LOGIC CỬA (THEO SRF05) -----
     if (dist > 0) {
       if (dist <= 50) {
         if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
@@ -119,7 +121,6 @@ void handleCommand(String cmd){
 
   if(cmd=="STATUS"){ sendStatus(true); return; }
 
-  // ---------- AUTO SWITCH ----------
   if(cmd.startsWith("AUTO")){
     if(parseIntAfterSpace(cmd,v)){
       modeAuto = clamp01(v);
@@ -128,7 +129,6 @@ void handleCommand(String cmd){
     return;
   }
 
-  // ---------- LED ----------
   if(cmd.startsWith("LED")){
     if(parseIntAfterSpace(cmd,v)){
       modeAuto = false;
@@ -139,19 +139,16 @@ void handleCommand(String cmd){
     return;
   }
 
-  // ---------- FAN ----------
   if(cmd.startsWith("FAN")){
     if(parseIntAfterSpace(cmd,v)){
       modeAuto = false;
       fanVal = clamp01(v);
       digitalWrite(FAN_PIN, fanVal);
-      // ⚠️ KHÔNG đụng tới LED ở đây (độc lập khi manual)
       sendStatus(true);
     }
     return;
   }
 
-  // ---------- SERVO ----------
   if(cmd.startsWith("SERVO")){
     if(parseIntAfterSpace(cmd,v)){
       modeAuto = false;
@@ -197,11 +194,14 @@ void setup(){
 
 void loop(){
   static String buf;
+  busySerial = Serial.available();     // 🔹 Nếu GUI đang gửi, tạm bỏ đo SRF05
+
   while(Serial.available()){
     char c=(char)Serial.read();
     if(c=='\n'||c=='\r'){
       if(buf.length()){ handleCommand(buf); buf=""; }
     } else if((unsigned char)c>=32) buf+=c;
   }
-  sendStatus(false);
+
+  if (!busySerial) sendStatus(false);  // 🔹 chỉ đo / gửi khi Serial rảnh
 }
