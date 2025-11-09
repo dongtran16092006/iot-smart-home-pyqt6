@@ -688,20 +688,23 @@ class Main(QMainWindow):
         except Exception as e:
             print("Auto logic error:", e)
 
-
     def _ensure_defaults(self):
         """Khi gas an toàn lại thì trả về mặc định."""
         self.send(f"FAN {DEFAULT_FAN}")
         self.send(f"SERVO {DEFAULT_SERVO}")
+        self.send("LED 0")  # tắt đèn
+        self.send("ALARM 0")  # tắt còi
         self.set_banner(False)
         self._auto_applied = False
 
     def _apply_alarm_low_only(self):
-        """Tự động bật fan + mở cửa, nhưng vẫn cho phép người dùng thao tác khác."""
+        """Tự động bật fan + mở cửa + đèn + còi khi phát hiện khí gas."""
         if getattr(self, "_auto_applied", False):
             return
-        self.send(f"FAN {ALARM_FAN}")
-        self.send(f"SERVO {ALARM_SERVO}")
+        self.send(f"FAN {ALARM_FAN}")  # bật quạt
+        self.send(f"SERVO {ALARM_SERVO}")  # mở cửa
+        self.send("LED 1")  # bật LED cảnh báo
+        self.send("ALARM 1")  # bật còi buzzer
         self._auto_applied = True
         self.set_banner(True)
 
