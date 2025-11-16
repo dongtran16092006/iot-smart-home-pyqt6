@@ -7,7 +7,7 @@ The project combines real-time sensor monitoring, automatic safety logic, and an
 ##  Overview
 
 This project demonstrates how an **IoT-based gas-safety system** can automatically detect hazardous gas levels, trigger ventilation, and alert users.  
-The PyQt6 desktop app communicates with an Arduino controller over serial USB, showing live sensor data and allowing manual control of devices like **LEDs, fans, servo doors, and buzzers**.
+The PyQt6 desktop app communicates with an Arduino controller over serial USB, showing live sensor data and allowing auto control of devices like **LEDs, fans, servo doors, and buzzers**.
 
 ---
 
@@ -23,7 +23,7 @@ The PyQt6 desktop app communicates with an Arduino controller over serial USB, s
 - Alarm buzzer triggered on high gas detection  
 
 ✅ Interactive dashboard:
-- Toggle devices (LED, fan, door) manually  
+- Toggle devices (LED, fan, door) automatically  
 - Visual gas-level graph  
 - Isometric “Nha pRo mAx” 3D layout  
 
