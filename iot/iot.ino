@@ -18,79 +18,85 @@ const bool USE_ULTRASONIC = true;
 int thrLow  = 380;
 int thrHigh = 450;
 bool modeAuto = true;
+
 int ledVal   = 0;
 int fanVal   = 0;
 int servoDeg = 0;
+
+// ⚠ ALARM KHÔNG BAO GIỜ CHO MANUAL
 int alarmVal = 0;
 
 Servo myServo;
 unsigned long lastStatusMs = 0;
-bool busySerial = false;   // ⚙️ THÊM DÒNG NÀY (quan trọng!)
+bool busySerial = false;
 
 int clamp01(int x){ return x<=0?0:1; }
 
+// ----------------- SIÊU ÂM -----------------
 long readDistanceCm(){
   if(!USE_ULTRASONIC) return -1;
   digitalWrite(TRIG_PIN, LOW); delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  unsigned long dur = pulseIn(ECHO_PIN, HIGH, 25000UL);  // timeout 25ms
+  unsigned long dur = pulseIn(ECHO_PIN, HIGH, 25000UL);
   if(!dur) return -1;
   return (long)(dur / 58);
 }
 
+
+// ----------------- GỬI JSON + AUTO LOGIC -----------------
 void sendStatus(bool force=false){
   unsigned long now = millis();
   if(!force && now - lastStatusMs < 1000) return;
   lastStatusMs = now;
 
   int gas = analogRead(GAS_PIN);
-  long dist = readDistanceCm();     // 📍 chỉ gọi khi không bận serial
+  long dist = readDistanceCm();
   float temp = dht.readTemperature();
   float humi = dht.readHumidity();
 
   bool overHi = (gas >= thrHigh);
   bool belowLo = (gas <= thrLow);
 
-  // ----------- AUTO LOGIC -----------
-  if (modeAuto) {
+  // ----------------- AUTO MODE -----------------
+  // ----------------- AUTO MODE -----------------
+if (modeAuto) {
+
+    // ----------------- LOA THEO MQ2 -----------------
+    alarmVal = overHi ? 1 : 0;
+    digitalWrite(ALARM_PIN, alarmVal);
+
+    // ----------------- FAN + LED THEO MQ2 -----------------
     if (overHi) {
-      alarmVal = 1;
-      digitalWrite(ALARM_PIN, HIGH);
-      fanVal = 1;
-      ledVal = 1;
-      digitalWrite(FAN_PIN, HIGH);
-      digitalWrite(LED_PIN, HIGH);
-      if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
-    } 
+        fanVal = 1; digitalWrite(FAN_PIN, HIGH);
+        ledVal = 1; digitalWrite(LED_PIN, HIGH);
+
+        // 🔥 CHÁY → MỞ CỬA, BỎ QUA SIÊU ÂM
+        if (servoDeg != 90) { servoDeg = 90; myServo.write(90); }
+    }
     else if (belowLo) {
-      alarmVal = 0;
-      digitalWrite(ALARM_PIN, LOW);
-      fanVal = 0;
-      ledVal = 0;
-      digitalWrite(FAN_PIN, LOW);
-      digitalWrite(LED_PIN, LOW);
-      if (servoDeg != 0) { servoDeg = 0; myServo.write(servoDeg); }
-    } 
+        fanVal = 0; digitalWrite(FAN_PIN, LOW);
+        ledVal = 0; digitalWrite(LED_PIN, LOW);
+
+        // không cháy → cửa đóng theo MQ2
+        if (servoDeg != 0) { servoDeg = 0; myServo.write(0); }
+    }
     else {
-      alarmVal = 1;
-      digitalWrite(ALARM_PIN, HIGH);
-      fanVal = 1;
-      ledVal = 1;
-      digitalWrite(FAN_PIN, HIGH);
-      digitalWrite(LED_PIN, HIGH);
+        fanVal = 1; digitalWrite(FAN_PIN, HIGH);
+        ledVal = 1; digitalWrite(LED_PIN, HIGH);
     }
 
-    // ----- LOGIC CỬA (THEO SRF05) -----
-    if (dist > 0) {
-      if (dist <= 50) {
-        if (servoDeg != 90) { servoDeg = 90; myServo.write(servoDeg); }
-      } 
-      else if (dist > 50 && !overHi) {
-        if (servoDeg != 0) { servoDeg = 0; myServo.write(servoDeg); }
-      }
+    // ----------------- CỬA THEO SIÊU ÂM -----------------
+    // ⚠ SIÊU ÂM CHỈ HOẠT ĐỘNG KHI KHÔNG CHÁY
+    if (!overHi && dist > 0) {
+        if (dist <= 50) {
+            if (servoDeg != 90) { servoDeg = 90; myServo.write(90); }
+        } else {
+            if (servoDeg != 0) { servoDeg = 0; myServo.write(0); }
+        }
     }
-  }
+}
+
 
   // ----------- GỬI JSON -----------
   Serial.print("{\"gas\":"); Serial.print(gas);
@@ -110,9 +116,13 @@ void sendStatus(bool force=false){
   Serial.flush();
 }
 
+
+// ----------------- LỆNH TỪ GUI -----------------
 bool parseIntAfterSpace(const String& s,int& v){
-  int sp=s.indexOf(' '); if(sp<0)return false;
-  v=s.substring(sp+1).toInt(); return true;
+  int sp=s.indexOf(' ');
+  if(sp<0) return false;
+  v=s.substring(sp+1).toInt();
+  return true;
 }
 
 void handleCommand(String cmd){
@@ -129,9 +139,9 @@ void handleCommand(String cmd){
     return;
   }
 
+  // ---------- LED MANUAL ----------
   if(cmd.startsWith("LED")){
-    if(parseIntAfterSpace(cmd,v)){
-      modeAuto = false;
+    if(!modeAuto && parseIntAfterSpace(cmd,v)){
       ledVal = clamp01(v);
       digitalWrite(LED_PIN, ledVal);
       sendStatus(true);
@@ -139,9 +149,9 @@ void handleCommand(String cmd){
     return;
   }
 
+  // ---------- FAN MANUAL ----------
   if(cmd.startsWith("FAN")){
-    if(parseIntAfterSpace(cmd,v)){
-      modeAuto = false;
+    if(!modeAuto && parseIntAfterSpace(cmd,v)){
       fanVal = clamp01(v);
       digitalWrite(FAN_PIN, fanVal);
       sendStatus(true);
@@ -149,9 +159,9 @@ void handleCommand(String cmd){
     return;
   }
 
+  // ---------- SERVO MANUAL ----------
   if(cmd.startsWith("SERVO")){
-    if(parseIntAfterSpace(cmd,v)){
-      modeAuto = false;
+    if(!modeAuto && parseIntAfterSpace(cmd,v)){
       servoDeg = constrain(v,0,180);
       myServo.write(servoDeg);
       sendStatus(true);
@@ -161,20 +171,13 @@ void handleCommand(String cmd){
 
   if(cmd.startsWith("THRHI")){ if(parseIntAfterSpace(cmd,v)) thrHigh=constrain(v,0,1023); return; }
   if(cmd.startsWith("THRLO")){ if(parseIntAfterSpace(cmd,v)) thrLow =constrain(v,0,1023); return; }
-
-  if(cmd.startsWith("ALARM")){
-    if(parseIntAfterSpace(cmd,v)){
-      modeAuto = false;
-      alarmVal = clamp01(v);
-      digitalWrite(ALARM_PIN, alarmVal);
-      sendStatus(true);
-    }
-    return;
-  }
 }
 
+
+// ----------------- SETUP -----------------
 void setup(){
   Serial.begin(115200);
+
   pinMode(GAS_PIN,INPUT);
   pinMode(LED_PIN,OUTPUT);
   pinMode(FAN_PIN,OUTPUT);
@@ -183,6 +186,7 @@ void setup(){
 
   myServo.attach(SERVO_PIN);
   myServo.write(0);
+
   digitalWrite(LED_PIN,LOW);
   digitalWrite(FAN_PIN,LOW);
   digitalWrite(ALARM_PIN,LOW);
@@ -192,16 +196,19 @@ void setup(){
   sendStatus(true);
 }
 
+
+// ----------------- LOOP -----------------
 void loop(){
   static String buf;
-  busySerial = Serial.available();     // 🔹 Nếu GUI đang gửi, tạm bỏ đo SRF05
+  busySerial = Serial.available();
 
   while(Serial.available()){
     char c=(char)Serial.read();
     if(c=='\n'||c=='\r'){
       if(buf.length()){ handleCommand(buf); buf=""; }
-    } else if((unsigned char)c>=32) buf+=c;
+    } 
+    else if((unsigned char)c>=32) buf+=c;
   }
 
-  if (!busySerial) sendStatus(false);  // 🔹 chỉ đo / gửi khi Serial rảnh
+  if (!busySerial) sendStatus(false);
 }
